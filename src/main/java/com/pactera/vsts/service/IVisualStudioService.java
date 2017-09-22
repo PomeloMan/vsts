@@ -14,7 +14,7 @@ public interface IVisualStudioService {
 	 * @param version 版本 (Default 1.0)
 	 * @return
 	 */
-	public String getWiqlUrl(String area, String project, String version);
+	public String getWiqlUrl(String area, String project, boolean expand, String version);
 
 	/**
 	 * @Description WorkItem API
@@ -24,7 +24,7 @@ public interface IVisualStudioService {
 	 * @param version 版本 (Default 1.0)
 	 * @return
 	 */
-	public String getWorkItemUrl(String area, String id, String version);
+	public String getWorkItemUrl(String area, String id, boolean expand, String version);
 
 	/**
 	 * @Description 根据查询语句查询结果

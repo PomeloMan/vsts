@@ -1,5 +1,7 @@
 package com.pactera.vsts.service.impl;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -26,6 +28,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.reflect.TypeToken;
+import com.pactera.util.FileUtil;
 import com.pactera.vsts.model.WorkItem;
 import com.pactera.vsts.service.IVisualStudioService;
 
@@ -36,13 +39,6 @@ public class VisualStudioService implements IVisualStudioService {
 
 	private static String accessToken;
 	private Gson gson = new GsonBuilder().create();
-
-	public static void main(String[] args) {
-		IVisualStudioService service = new VisualStudioService();
-		String url = service.getWorkItemUrl("skype", "1113959", "1.0");
-		List<WorkItem> list = service.getWorkItems(url);
-		System.out.println(list);
-	}
 
 	static {
 		ResourceBundle rb = ResourceBundle.getBundle("application");
@@ -65,7 +61,26 @@ public class VisualStudioService implements IVisualStudioService {
 				String.format("%s:%s", "", privateKey).getBytes());
 	}
 
-	private List<WorkItem> fromJson(String content) {
+	private List<String> fromJsonToWorkItemIds(String content) {
+		List<String> workitems = new ArrayList<String>();
+		JsonObject jo = gson.fromJson(content, new TypeToken<JsonObject>() {
+		}.getType());
+		JsonArray ja = jo.get("workItems") == null ? null : jo.get("workItems")
+				.getAsJsonArray();
+		if (ja != null) {
+			for (JsonElement je : ja) {
+				JsonObject wijo = je.getAsJsonObject();
+				String id = wijo.get("id") != null ? wijo.get("id")
+						.getAsString() : null;
+				if (id != null) {
+					workitems.add(id);
+				}
+			}
+		}
+		return workitems;
+	}
+
+	private List<WorkItem> fromJsonToWorkItems(String content) {
 		List<WorkItem> workitems = new ArrayList<WorkItem>();
 		JsonObject jo = gson.fromJson(content, new TypeToken<JsonObject>() {
 		}.getType());
@@ -74,16 +89,16 @@ public class VisualStudioService implements IVisualStudioService {
 		if (ja != null) {
 			// several
 			for (JsonElement je : ja) {
-				workitems.add(fromJson(je));
+				workitems.add(fromJsonToWorkItem(je));
 			}
 		} else {
 			// single
-			workitems.add(fromJson(jo));
+			workitems.add(fromJsonToWorkItem(jo));
 		}
 		return workitems;
 	}
 
-	private WorkItem fromJson(JsonElement je) {
+	private WorkItem fromJsonToWorkItem(JsonElement je) {
 		WorkItem wi = new WorkItem();
 
 		JsonObject jo = je.getAsJsonObject();
@@ -91,6 +106,9 @@ public class VisualStudioService implements IVisualStudioService {
 		wi.setRev(jo.get("rev") != null ? jo.get("rev").getAsString() : null);
 		wi.setUrl(jo.get("url") != null ? jo.get("url").getAsString() : null);
 
+		/**
+		 * fields
+		 */
 		JsonObject fieldsJo = jo.get("fields") != null ? jo.get("fields")
 				.getAsJsonObject() : null;
 		if (fieldsJo != null) {
@@ -120,7 +138,37 @@ public class VisualStudioService implements IVisualStudioService {
 					.get("System.Description").getAsString() : null);
 			wi.setSystemTags(fieldsJo.get("System.Tags") != null ? fieldsJo
 					.get("System.Tags").getAsString() : null);
+			wi.setSystemAssignedTo(fieldsJo.get("System.AssignedTo") != null ? fieldsJo
+					.get("System.AssignedTo").getAsString() : null);
 		}
+		/**
+		 * relations
+		 */
+		JsonArray relationsJa = jo.get("relations") != null ? jo.get(
+				"relations").getAsJsonArray() : null;
+		if (relationsJa != null) {
+			List<File> attachments = new ArrayList<File>();
+			for (JsonElement relationsJe : relationsJa) {
+				String name = null;
+				JsonObject relationsJo = relationsJe.getAsJsonObject();
+				JsonObject attributesJo = relationsJo.get("attributes") != null ? relationsJo
+						.get("attributes").getAsJsonObject() : null;
+				if (attributesJo != null) {
+					name = attributesJo.get("name") != null ? attributesJo.get(
+							"name").getAsString() : null;
+				}
+				String url = relationsJo.get("url") != null ? relationsJo.get(
+						"url").getAsString() : null;
+				File attachment = getFileAttachment(name, url);
+				if (attachment != null) {
+					attachments.add(attachment);
+				}
+			}
+			wi.setAttachments(attachments);
+		}
+		/**
+		 * _links
+		 */
 		JsonObject linksJo = jo.get("_links") != null ? jo.get("_links")
 				.getAsJsonObject() : null;
 		JsonElement hrefJe = null;
@@ -170,27 +218,48 @@ public class VisualStudioService implements IVisualStudioService {
 		return wi;
 	}
 
-	public String getWiqlUrl(String area, String project, String version) {
+	private File getFileAttachment(String name, String url) {
+		File temp = null;
+		HttpGet httpRequest = new HttpGet(url);
+		CloseableHttpClient httpclient = getHttpClient();
+		try {
+			temp = FileUtil.getRelativeTempFile(name);
+			HttpResponse response = httpclient.execute(httpRequest);
+			IOUtils.copy(response.getEntity().getContent(), new FileOutputStream(temp));
+		} catch (IOException e) {
+			logger.warn(e.getMessage(), e);
+		} finally {
+			IOUtils.closeQuietly(httpclient);
+		}
+		return temp;
+	}
+
+	public String getWiqlUrl(String area, String project, boolean expand,
+			String version) {
 		Asserts.notNull(area, "Area can't be null.");
 		Asserts.notNull(project, "Project can't be null.");
 		return String
-				.format("https://%s.visualstudio.com/DefaultCollection/%s_apis/wit/wiql?api-version=%s",
-						area, project + '/', version != null ? version : "1.0");
+				.format("https://%s.visualstudio.com/DefaultCollection/%s_apis/wit/wiql?$expand=%s&api-version=%s",
+						area, project + '/', expand ? "all" : "none",
+						version != null ? version : "1.0");
 	}
 
-	public String getWorkItemUrl(String area, String ids, String version) {
+	public String getWorkItemUrl(String area, String ids, boolean expand,
+			String version) {
 		Asserts.notNull(area, "Area can't be null.");
 		Asserts.notNull(ids, "IDs can't be null.");
 		if (ids.contains(",")) {
 			// several
 			return String
-					.format("https://%s.visualstudio.com/DefaultCollection/_apis/wit/workitems?%s&api-version=%s",
-							area, "ids=" + ids, version != null ? version : "1.0");
+					.format("https://%s.visualstudio.com/DefaultCollection/_apis/wit/workitems?ids=%s&$expand=%s&api-version=%s",
+							area, ids, expand ? "all" : "none",
+							version != null ? version : "1.0");
 		} else {
 			// single
 			return String
-					.format("https://%s.visualstudio.com/DefaultCollection/_apis/wit/workitems%s?api-version=%s",
-							area, "/" + ids, version != null ? version : "1.0");
+					.format("https://%s.visualstudio.com/DefaultCollection/_apis/wit/workitems/%s?$expand=%s&api-version=%s",
+							area, ids, expand ? "all" : "none",
+							version != null ? version : "1.0");
 		}
 	}
 
@@ -206,9 +275,8 @@ public class VisualStudioService implements IVisualStudioService {
 		CloseableHttpClient httpclient = getHttpClient();
 		try {
 			HttpResponse response = httpclient.execute(httpRequest);
-			ids = gson.fromJson(EntityUtils.toString(response.getEntity()),
-					new TypeToken<List<String>>() {
-					}.getType());
+			String content = EntityUtils.toString(response.getEntity());
+			ids = fromJsonToWorkItemIds(content);
 		} catch (IOException e) {
 			logger.warn(e.getMessage(), e);
 		} finally {
@@ -223,7 +291,7 @@ public class VisualStudioService implements IVisualStudioService {
 		try {
 			HttpResponse response = httpclient.execute(httpRequest);
 			String content = EntityUtils.toString(response.getEntity());
-			return fromJson(content);
+			return fromJsonToWorkItems(content);
 		} catch (IOException e) {
 			logger.warn(e.getMessage(), e);
 		} finally {

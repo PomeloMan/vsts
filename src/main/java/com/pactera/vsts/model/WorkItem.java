@@ -1,5 +1,8 @@
 package com.pactera.vsts.model;
 
+import java.io.File;
+import java.util.List;
+
 public class WorkItem {
 
 	/**
@@ -20,12 +23,12 @@ public class WorkItem {
 	private String systemTitle;
 	private String systemDescription;
 	private String systemTags;
+	private String systemAssignedTo;
 	private String url;
 
 	/**
-	 * _apis/wit/workitems/1113959&api-version=1.0
+	 * _apis/wit/workitems/1113959?api-version=1.0
 	 */
-	private String systemAssignedTo;
 	private String systemHistory;
 	private String linksSelf;
 	private String linksWorkItemUpdates;
@@ -34,6 +37,11 @@ public class WorkItem {
 	private String linksHtml;
 	private String linksWorkItemType;
 	private String linksFields;
+
+	/**
+	 * _apis/wit/workitems/1113959?$expand=all&api-version=1.0
+	 */
+	private List<File> attachments;
 
 	public String getId() {
 		return id;
@@ -233,6 +241,14 @@ public class WorkItem {
 
 	public void setLinksFields(String linksFields) {
 		this.linksFields = linksFields;
+	}
+
+	public List<File> getAttachments() {
+		return attachments;
+	}
+
+	public void setAttachments(List<File> attachments) {
+		this.attachments = attachments;
 	}
 
 }
